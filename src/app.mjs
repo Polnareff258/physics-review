@@ -4,12 +4,15 @@ import {orderQuestionImages, questionPage} from './viewer.mjs';
 import {createStorage} from './storage.mjs';
 import {createGitHubSync} from './github.mjs';
 import {buildBackup, readBackup} from './backup.mjs';
+import {buildLearningInsights} from './learning-insights.mjs';
+import {buildCoachData, buildCoachPrompt, buildLocalAdvice, containsKnownSecret, requestDeepSeek, resultProvenance} from './coach.mjs';
 
 const $ = id => document.getElementById(id);
 const preview = ['localhost','127.0.0.1','[::1]'].includes(location.hostname) && new URLSearchParams(location.search).has('preview');
 const store = createStorage(preview ? sessionStorage : localStorage);
 let bank=null, set=[], index=0, selection='', selectionAtReveal='', typedAtReveal='', usedHint=false;
 let urls=[], generation=0, syncTimer=null, questionStarted=0, sessionId='', sessionRatings=[], noteDirty=false;
+let coachPromptDirty=false, coachPromptStale=false, coachAbort=null, coachLastSentPrompt=null;
 const label={remembered:'记住了',known:'记住了',fuzzy:'模糊',forgot:'不会'};
 const client = preview ? {
   async loadQuestions(){const r=await fetch('./data/questions.json');if(!r.ok)throw new Error('无法读取本地题库');const q=await r.json();store.setQuestions(q);return q;},
@@ -53,6 +56,8 @@ function refreshDashboard(){
     $('mastery-summary').textContent=`记住了 ${info.mastery.known} · 模糊 ${info.mastery.fuzzy} · 不会 ${info.mastery.forgot} · 未练 ${info.mastery.unreviewed}`;
     const compared=info.sourceComparison.match+info.sourceComparison.different;
     $('source-summary').textContent=compared?`新记录中有 ${info.sourceComparison.match} 次与原答案相同、${info.sourceComparison.different} 次不同。原答案尚未逐题核验，该对照不代表得分。`:'作答对照从新版开始记录；旧记录保留，但无法判断是否在看答案前作答。';
+    renderLearningInsights(data,events);
+    if($('coach-panel').open&&!coachAbort){if(!coachPromptDirty)generateCoachPrompt();else $('coach-preview-status').textContent=coachPromptStale?'选项已更改，请先点击“重新生成材料”。':'这是你编辑过的材料；需要最新记录时请点“重新生成材料”。';}
     const subjectBox=$('subject-stats');subjectBox.replaceChildren();
     for(const [subject,g] of Object.entries(info.subjects)){const item=el('div',null,'subject-row');const covered=g.total-g.unreviewed;item.append(el('strong',subject),el('span',`已练 ${covered}/${g.total} · 待复习 ${g.due} · 不熟悉 ${g.fuzzy+g.forgot}`));subjectBox.append(item);}
     const activity=$('activity');activity.replaceChildren();const max=Math.max(1,...info.activity.map(x=>x.count));
@@ -61,6 +66,48 @@ function refreshDashboard(){
     if(!info.recent.length)recent.append(el('p','完成几道题后，这里会显示你的记录。','muted'));
     for(const event of info.recent.slice(0,5)){const q=byId.get(event.questionId);if(!q)continue;const item=el('button',null,'recent-row');item.type='button';item.append(el('span',`${q.subject} · 第 ${q.number} 题`),el('span',`${formatDate(event.at)} · ${label[event.rating]||'已练习'}`,'subtle'));item.addEventListener('click',()=>startSession({questionId:q.id}));recent.append(item);}
   }catch(e){showError('setup-status',e);}
+}
+function renderLearningInsights(questions,events){
+  const data=buildLearningInsights(questions,events),metrics=$('analysis-metrics');metrics.replaceChildren();
+  const independent=data.independentRecall.eligible?`${data.independentRecall.success}/${data.independentRecall.eligible} 次`:'暂无数据';
+  for(const [value,title] of [[`${data.activeDays7}/7 天`,'近 7 天有练习'],[String(data.overdueDayPlus),'昨天及以前到期'],[independent,'无提示先作答后自评记住']]){
+    const card=el('div',null,'analysis-metric');card.append(el('strong',value),el('span',title));metrics.append(card);
+  }
+  const daily=$('analysis-daily');daily.replaceChildren();const max=Math.max(1,...data.daily14.map(x=>x.count));
+  for(const day of data.daily14){const item=el('div',null,'analysis-day'),bar=el('span',null,'analysis-bar');bar.style.height=`${Math.max(4,Math.round(42*day.count/max))}px`;item.setAttribute('aria-label',`${day.date}：${day.count} 次，${day.unique} 道题`);item.append(el('span',String(day.count)),bar,el('span',day.date.slice(5).replace('-','/')));daily.append(item);}
+  const subjects=$('analysis-subjects');subjects.replaceChildren();
+  for(const row of data.subjects){const item=el('div',null,'subject-row');item.append(el('strong',row.subject),el('span',`已练 ${row.covered}/${row.total} · 自评不熟 ${row.weak} · 待复习 ${row.due}`));subjects.append(item);}
+  const upcoming=$('analysis-upcoming');upcoming.replaceChildren();for(const day of data.upcoming7){const item=el('span',`${day.date.slice(5).replace('-','/')}  ${day.count} 题`,'upcoming-day');upcoming.append(item);}
+  const advice=$('analysis-advice');advice.replaceChildren();for(const line of buildLocalAdvice(data))advice.append(el('li',line));
+}
+function updateCoachResult(){if(coachLastSentPrompt!==null)$('coach-result-meta').textContent=resultProvenance(coachLastSentPrompt,$('coach-prompt').value,coachPromptStale);}
+function generateCoachPrompt(){
+  if(coachAbort){$('coach-preview-status').textContent='分析进行中，完成或取消后才能重新生成材料。';return;}
+  const questions=bank?.questions;if(!Array.isArray(questions)||!questions.length){$('coach-preview-status').textContent='请先连接题库，或使用本机预览。';return;}
+  try{const data=buildLearningInsights(questions,store.getEvents());$('coach-prompt').value=buildCoachPrompt(data,{includeQuestionDetails:$('coach-include-questions').checked,questions});coachPromptDirty=false;coachPromptStale=false;$('coach-run').disabled=false;$('coach-copy').disabled=false;$('coach-download').disabled=false;$('coach-preview-status').textContent='材料已根据本机现有记录生成，可以查看或编辑。';updateCoachResult();}
+  catch(e){showError('coach-preview-status',e);}
+}
+async function copyCoachPrompt(){
+  if(coachPromptStale){$('coach-preview-status').textContent='选项已更改，请先重新生成材料。';return;}
+  const value=$('coach-prompt').value;if(!value.trim()){$('coach-preview-status').textContent='请先生成或填写分析材料。';return;}
+  if(containsKnownSecret(value,[store.getConfig().token,$('coach-key').value])){$('coach-preview-status').textContent='材料中含有当前令牌或密钥，请先移除。';return;}
+  try{await navigator.clipboard.writeText(value);$('coach-preview-status').textContent='已复制，可粘贴到你选择的 AI 工具。';}
+  catch{$('coach-prompt').focus();$('coach-prompt').select();$('coach-preview-status').textContent='请手动复制已选中的材料。';}
+}
+function setCoachBusy(busy){
+  for(const id of ['coach-prompt','coach-include-questions','coach-generate','coach-model','coach-key'])$(id).disabled=busy;
+  $('coach-download').disabled=busy||coachPromptStale;$('coach-run').disabled=busy||coachPromptStale;$('coach-copy').disabled=busy||coachPromptStale;$('coach-cancel').hidden=!busy;
+}
+async function runCoach(){
+  if(coachAbort)return;if(coachPromptStale){$('coach-status').textContent='选项已更改，请先重新生成材料。';return;}
+  const key=$('coach-key').value,model=$('coach-model').value,prompt=$('coach-prompt').value;
+  if(!key.trim()){$('coach-status').textContent='请先在本页面填写 DeepSeek API 密钥；不要发送到聊天中。';return;}
+  if(!prompt.trim()){$('coach-status').textContent='请先生成或填写分析材料。';return;}
+  if(containsKnownSecret(prompt,[store.getConfig().token,key])){$('coach-status').textContent='材料中含有当前令牌或密钥，请先移除。';return;}
+  coachAbort=new AbortController();setCoachBusy(true);$('coach-status').textContent='正在发送材料并生成建议…';$('coach-output-wrap').hidden=true;
+  try{const result=await requestDeepSeek({key,model,prompt,signal:coachAbort.signal});$('coach-output').textContent=result.text;coachLastSentPrompt=prompt;$('coach-sent-prompt').textContent=prompt;$('coach-output-wrap').hidden=false;updateCoachResult();const usage=result.usage.prompt_tokens||result.usage.completion_tokens?`（输入 ${result.usage.prompt_tokens} / 输出 ${result.usage.completion_tokens} tokens）`:'';$('coach-status').textContent=`分析完成${usage}。${result.finishReason&&result.finishReason!=='stop'?'输出可能不完整，请结合实际情况查看。':''}`;}
+  catch(e){$('coach-status').textContent=e?.name==='AbortError'?'已取消请求。':e.message;}
+  finally{coachAbort=null;setCoachBusy(false);}
 }
 async function images(target,paths,version,{pages=[],isQuestion=false}={}){
   target.replaceChildren();const selected=isQuestion?orderQuestionImages(paths,pages):(paths||[]);const wanted=new Set(pages.map(Number));
@@ -126,6 +173,14 @@ async function startSession(options={}){
     index=0;sessionId=crypto.randomUUID();sessionRatings=[];$('last-saved').textContent='';screen('practice');renderQuestion();
   }catch(e){showError('setup-status',e);}finally{$('start').disabled=false;$('recommended-start').disabled=false;}
 }
+$('coach-panel').querySelector('summary').addEventListener('click',()=>{if($('coach-panel').open){$('coach-key').value='';if(coachAbort)coachAbort.abort();}});
+$('coach-panel').addEventListener('toggle',()=>{if($('coach-panel').open){if(coachAbort){setCoachBusy(true);return;}if(!coachPromptDirty)generateCoachPrompt();else $('coach-preview-status').textContent=coachPromptStale?'选项已更改，请先点击“重新生成材料”。':'这是你编辑过的材料；需要最新数据时请点“重新生成材料”。';}else{$('coach-key').value='';if(coachAbort)coachAbort.abort();}});
+$('coach-generate').addEventListener('click',generateCoachPrompt);
+$('coach-prompt').addEventListener('input',()=>{coachPromptDirty=true;updateCoachResult();});
+$('coach-include-questions').addEventListener('change',()=>{if(coachPromptDirty){coachPromptStale=true;$('coach-run').disabled=true;$('coach-copy').disabled=true;$('coach-download').disabled=true;updateCoachResult();$('coach-preview-status').textContent='选项已更改。为避免发送与选择不符的内容，请点击“重新生成材料”（会替换手动编辑的文字）。';}else generateCoachPrompt();});
+$('coach-copy').addEventListener('click',copyCoachPrompt);
+$('coach-download').addEventListener('click',()=>{try{if(coachAbort||coachPromptStale)throw new Error('请先完成当前分析并更新预览');if(!bank?.questions?.length)throw new Error('请先连接题库');const data=buildLearningInsights(bank.questions,store.getEvents()),payload=buildCoachData(data,{includeQuestionDetails:$('coach-include-questions').checked,questions:bank.questions});const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`物理复习统计-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('coach-preview-status').textContent='已准备统计文件；该文件不包含你手动编辑的材料。';}catch(e){showError('coach-preview-status',e);}});
+$('coach-run').addEventListener('click',runCoach);$('coach-cancel').addEventListener('click',()=>coachAbort?.abort());
 $('settings-open').addEventListener('click',()=>{configInputs();screen('settings');});$('settings-close').addEventListener('click',()=>screen('setup'));
 $('connect').addEventListener('click',async()=>{const match=$('repo').value.trim().match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/),token=$('token').value.trim();if(!match||!token){$('connection-status').textContent='请填写用户名/仓库名和访问令牌。';return;}try{store.setConfig({owner:match[1],repo:match[2],token});$('connection-status').textContent='正在连接并读取题库…';bank=await client.loadQuestions();if(!Array.isArray(bank.questions))throw new Error('题库格式不正确');await client.sync();$('setup-status').textContent=`已载入 ${bank.questions.length} 题。`;screen('setup');}catch(e){showError('connection-status',e);}});
 $('backup-export').addEventListener('click',()=>{try{const records=store.getEvents();const blob=new Blob([JSON.stringify(buildBackup(records),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`物理复习记录-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('backup-status').textContent=`已准备 ${records.length} 条记录的备份。`;}catch(e){showError('backup-status',e);}});

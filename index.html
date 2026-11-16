@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob:; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob:; connect-src 'self' https://api.github.com https://api.deepseek.com; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>大学物理 · 复习</title><link rel="stylesheet" href="src/style.css">
 </head>
 <body>
@@ -27,6 +27,16 @@
     <details class="card details-card" id="insights"><summary>查看学习记录与分析</summary><p class="muted">以下按你每次的自评统计。原答案尚未全部核验，因此不显示客观正确率。</p>
       <h3>最近一次自评</h3><p id="mastery-summary" class="mastery-summary"></p><p id="source-summary" class="muted"></p><h3>各科进度</h3><div id="subject-stats" class="subject-stats"></div><h3>最近 7 天</h3><div id="activity" class="activity" aria-label="最近七天练习次数"></div>
       <h3>最近复习过</h3><div id="recent-activity" class="recent-activity"></div>
+      <h3>近两周学习分析</h3><p class="muted">只根据你的练习和自评计算；旧记录未保存的细节不会猜测。</p><div id="analysis-metrics" class="analysis-metrics"></div><h4>近 14 天练习</h4><p class="muted compact">可左右滑动查看更多日期。</p><div id="analysis-daily" class="analysis-daily" aria-label="近十四天练习次数"></div><h4>各科回顾</h4><div id="analysis-subjects" class="subject-stats"></div><h4>未来 7 天到期</h4><div id="analysis-upcoming" class="upcoming"></div><h4>可以这样安排</h4><ul id="analysis-advice" class="analysis-advice"></ul>
+    </details>
+    <details class="card details-card" id="coach-panel"><summary>AI 学习顾问</summary>
+      <p class="muted">先生成并查看分析材料。默认仅包含统计、题号与自评，不含个人笔记、作答原文或令牌。</p>
+      <label class="check-label"><input id="coach-include-questions" type="checkbox"> 附上少量待复习题目的文字摘要（可能缺少图和公式）</label>
+      <div class="actions"><button id="coach-generate" class="quiet" type="button">重新生成材料</button><button id="coach-copy" class="quiet" type="button">复制材料给其他 AI</button><button id="coach-download" class="quiet" type="button">下载统计 JSON</button></div>
+      <label>将发送或复制的材料<textarea id="coach-prompt" rows="9" maxlength="40000" placeholder="连接题库后生成分析材料；可以自行编辑"></textarea></label><p id="coach-preview-status" class="muted" role="status"></p>
+      <h3>使用 DeepSeek 分析</h3><p class="muted">点击分析时，上方材料会发送至 DeepSeek 官方接口（api.deepseek.com），可能产生 API 费用。密钥只留在当前页面，关闭或刷新后需重新输入；不要把密钥写进材料或发到聊天中。</p>
+      <label>模型<select id="coach-model"><option value="deepseek-flash">DeepSeek Flash（默认）</option><option value="deepseek-v4-pro">DeepSeek V4 Pro</option></select></label><label>DeepSeek API 密钥<input id="coach-key" type="password" autocomplete="off" spellcheck="false" placeholder="在当前页面填写，不会存入复习记录"></label>
+      <div class="actions"><button id="coach-run" type="button">发送材料并分析</button><button id="coach-cancel" class="quiet" type="button" hidden>取消请求</button></div><p id="coach-status" role="status" class="muted"></p><div id="coach-output-wrap" hidden><h3>AI 建议</h3><p id="coach-result-meta" class="muted"></p><div id="coach-output" class="coach-output"></div><details class="sent-material"><summary>查看这次发送的材料</summary><pre id="coach-sent-prompt"></pre></details></div>
     </details>
     <p id="setup-status" role="status" class="muted"></p>
   </section>
