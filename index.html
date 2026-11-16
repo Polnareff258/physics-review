@@ -24,7 +24,7 @@
       <div class="fields"><label>科目<select id="subject"><option value="all">全部科目</option><option>电学</option><option>磁学</option><option>光学</option><option>相对论</option></select></label><label>题型<select id="type"><option value="all">选择和填空</option><option value="choice">选择题</option><option value="fill">填空题</option></select></label><label>题数<input id="count" type="number" min="1" max="310" value="10"></label><label>抽题方式<select id="mode"><option value="weak">优先到期与新题</option><option value="due">只练已到期的题</option><option value="random">完全随机</option><option value="difficult">重点复习的题</option><option value="recent">最近复习的题</option></select></label></div>
       <button id="start" type="button">按条件开始</button>
     </details>
-    <details class="card details-card" id="insights"><summary>查看学习记录与分析</summary><p class="muted">以下按你每次的自评统计。原答案尚未全部核验，因此不显示客观正确率。</p>
+    <details class="card details-card" id="insights"><summary>查看学习记录与分析</summary><p class="muted">以下按当前设备已保存的记录统计。若刚在其他设备练习，可先同步；原答案尚未全部核验，因此不显示客观正确率。</p><button id="analysis-sync" class="quiet compact-button" type="button">同步最新学习记录</button><p id="analysis-sync-status" class="muted" role="status"></p>
       <h3>最近一次自评</h3><p id="mastery-summary" class="mastery-summary"></p><p id="source-summary" class="muted"></p><h3>各科进度</h3><div id="subject-stats" class="subject-stats"></div><h3>最近 7 天</h3><div id="activity" class="activity" aria-label="最近七天练习次数"></div>
       <h3>最近复习过</h3><div id="recent-activity" class="recent-activity"></div>
       <h3>近两周学习分析</h3><p class="muted">只根据你的练习和自评计算；旧记录未保存的细节不会猜测。</p><div id="analysis-metrics" class="analysis-metrics"></div><h4>近 14 天练习</h4><p class="muted compact">可左右滑动查看更多日期。</p><div id="analysis-daily" class="analysis-daily" aria-label="近十四天练习次数"></div><h4>各科回顾</h4><div id="analysis-subjects" class="subject-stats"></div><h4>未来 7 天到期</h4><div id="analysis-upcoming" class="upcoming"></div><h4>可以这样安排</h4><ul id="analysis-advice" class="analysis-advice"></ul>
@@ -32,7 +32,7 @@
     <details class="card details-card" id="coach-panel"><summary>AI 学习顾问</summary>
       <p class="muted">先生成并查看分析材料。默认仅包含统计、题号与自评，不含个人笔记、作答原文或令牌。</p>
       <label class="check-label"><input id="coach-include-questions" type="checkbox"> 附上少量待复习题目的文字摘要（可能缺少图和公式）</label>
-      <div class="actions"><button id="coach-generate" class="quiet" type="button">重新生成材料</button><button id="coach-copy" class="quiet" type="button">复制材料给其他 AI</button><button id="coach-download" class="quiet" type="button">下载统计 JSON</button></div>
+      <div class="actions"><button id="coach-sync" class="quiet" type="button">同步最新记录</button><button id="coach-generate" class="quiet" type="button">重新生成材料</button><button id="coach-copy" class="quiet" type="button">复制材料给其他 AI</button><button id="coach-download" class="quiet" type="button">下载统计 JSON</button></div>
       <label>将发送或复制的材料<textarea id="coach-prompt" rows="9" maxlength="40000" placeholder="连接题库后生成分析材料；可以自行编辑"></textarea></label><p id="coach-preview-status" class="muted" role="status"></p>
       <h3>使用 DeepSeek 分析</h3><p class="muted">点击分析时，上方材料会发送至 DeepSeek 官方接口（api.deepseek.com），可能产生 API 费用。密钥只留在当前页面，关闭或刷新后需重新输入；不要把密钥写进材料或发到聊天中。</p>
       <label>模型<select id="coach-model"><option value="deepseek-flash">DeepSeek Flash（默认）</option><option value="deepseek-v4-pro">DeepSeek V4 Pro</option></select></label><label>DeepSeek API 密钥<input id="coach-key" type="password" autocomplete="off" spellcheck="false" placeholder="在当前页面填写，不会存入复习记录"></label>

@@ -12,7 +12,7 @@ const preview = ['localhost','127.0.0.1','[::1]'].includes(location.hostname) &&
 const store = createStorage(preview ? sessionStorage : localStorage);
 let bank=null, set=[], index=0, selection='', selectionAtReveal='', typedAtReveal='', usedHint=false;
 let urls=[], generation=0, syncTimer=null, questionStarted=0, sessionId='', sessionRatings=[], noteDirty=false;
-let coachPromptDirty=false, coachPromptStale=false, coachAbort=null, coachLastSentPrompt=null;
+let coachPromptDirty=false, coachPromptStale=false, coachAbort=null, coachLastSentPrompt=null, analysisSyncing=false, coachRefreshPending=false;
 const label={remembered:'记住了',known:'记住了',fuzzy:'模糊',forgot:'不会'};
 const client = preview ? {
   async loadQuestions(){const r=await fetch('./data/questions.json');if(!r.ok)throw new Error('无法读取本地题库');const q=await r.json();store.setQuestions(q);return q;},
@@ -21,6 +21,7 @@ const client = preview ? {
 } : createGitHubSync({storage:store,onStatus:({state,message})=>{
   const text=state==='syncing'?'正在同步…':state==='success'?'同步完成。':`同步未完成：${message||'请检查网络和设置'}。本机记录仍然保留。`;
   $('connection-status').textContent=text;$('sync-status').textContent=text;
+  if(state==='success' && coachAbort)coachRefreshPending=true;
   if(state==='success' && !$('setup').hidden) refreshDashboard();
 }});
 function screen(name){for(const s of ['setup','practice','finished','settings'])$(s).hidden=s!==name;if(name==='setup')refreshDashboard();}
@@ -84,7 +85,7 @@ function updateCoachResult(){if(coachLastSentPrompt!==null)$('coach-result-meta'
 function generateCoachPrompt(){
   if(coachAbort){$('coach-preview-status').textContent='分析进行中，完成或取消后才能重新生成材料。';return;}
   const questions=bank?.questions;if(!Array.isArray(questions)||!questions.length){$('coach-preview-status').textContent='请先连接题库，或使用本机预览。';return;}
-  try{const data=buildLearningInsights(questions,store.getEvents());$('coach-prompt').value=buildCoachPrompt(data,{includeQuestionDetails:$('coach-include-questions').checked,questions});coachPromptDirty=false;coachPromptStale=false;$('coach-run').disabled=false;$('coach-copy').disabled=false;$('coach-download').disabled=false;$('coach-preview-status').textContent='材料已根据本机现有记录生成，可以查看或编辑。';updateCoachResult();}
+  try{const data=buildLearningInsights(questions,store.getEvents());$('coach-prompt').value=buildCoachPrompt(data,{includeQuestionDetails:$('coach-include-questions').checked,questions});coachPromptDirty=false;coachPromptStale=false;setCoachBusy(Boolean(coachAbort));$('coach-preview-status').textContent='材料已根据本机现有记录生成，可以查看或编辑。';updateCoachResult();}
   catch(e){showError('coach-preview-status',e);}
 }
 async function copyCoachPrompt(){
@@ -95,11 +96,13 @@ async function copyCoachPrompt(){
   catch{$('coach-prompt').focus();$('coach-prompt').select();$('coach-preview-status').textContent='请手动复制已选中的材料。';}
 }
 function setCoachBusy(busy){
-  for(const id of ['coach-prompt','coach-include-questions','coach-generate','coach-model','coach-key'])$(id).disabled=busy;
-  $('coach-download').disabled=busy||coachPromptStale;$('coach-run').disabled=busy||coachPromptStale;$('coach-copy').disabled=busy||coachPromptStale;$('coach-cancel').hidden=!busy;
+  const locked=busy||analysisSyncing;
+  $('analysis-sync').disabled=locked;
+  for(const id of ['coach-prompt','coach-include-questions','coach-generate','coach-model','coach-key','coach-sync'])$(id).disabled=locked;
+  $('coach-download').disabled=locked||coachPromptStale;$('coach-run').disabled=locked||coachPromptStale;$('coach-copy').disabled=locked||coachPromptStale;$('coach-cancel').hidden=!busy;
 }
 async function runCoach(){
-  if(coachAbort)return;if(coachPromptStale){$('coach-status').textContent='选项已更改，请先重新生成材料。';return;}
+  if(coachAbort||analysisSyncing)return;if(coachPromptStale){$('coach-status').textContent='选项已更改，请先重新生成材料。';return;}
   const key=$('coach-key').value,model=$('coach-model').value,prompt=$('coach-prompt').value;
   if(!key.trim()){$('coach-status').textContent='请先在本页面填写 DeepSeek API 密钥；不要发送到聊天中。';return;}
   if(!prompt.trim()){$('coach-status').textContent='请先生成或填写分析材料。';return;}
@@ -107,7 +110,7 @@ async function runCoach(){
   coachAbort=new AbortController();setCoachBusy(true);$('coach-status').textContent='正在发送材料并生成建议…';$('coach-output-wrap').hidden=true;
   try{const result=await requestDeepSeek({key,model,prompt,signal:coachAbort.signal});$('coach-output').textContent=result.text;coachLastSentPrompt=prompt;$('coach-sent-prompt').textContent=prompt;$('coach-output-wrap').hidden=false;updateCoachResult();const usage=result.usage.prompt_tokens||result.usage.completion_tokens?`（输入 ${result.usage.prompt_tokens} / 输出 ${result.usage.completion_tokens} tokens）`:'';$('coach-status').textContent=`分析完成${usage}。${result.finishReason&&result.finishReason!=='stop'?'输出可能不完整，请结合实际情况查看。':''}`;}
   catch(e){$('coach-status').textContent=e?.name==='AbortError'?'已取消请求。':e.message;}
-  finally{coachAbort=null;setCoachBusy(false);}
+  finally{coachAbort=null;setCoachBusy(false);if(coachRefreshPending){coachRefreshPending=false;refreshDashboard();}}
 }
 async function images(target,paths,version,{pages=[],isQuestion=false}={}){
   target.replaceChildren();const selected=isQuestion?orderQuestionImages(paths,pages):(paths||[]);const wanted=new Set(pages.map(Number));
@@ -175,11 +178,20 @@ async function startSession(options={}){
 }
 $('coach-panel').querySelector('summary').addEventListener('click',()=>{if($('coach-panel').open){$('coach-key').value='';if(coachAbort)coachAbort.abort();}});
 $('coach-panel').addEventListener('toggle',()=>{if($('coach-panel').open){if(coachAbort){setCoachBusy(true);return;}if(!coachPromptDirty)generateCoachPrompt();else $('coach-preview-status').textContent=coachPromptStale?'选项已更改，请先点击“重新生成材料”。':'这是你编辑过的材料；需要最新数据时请点“重新生成材料”。';}else{$('coach-key').value='';if(coachAbort)coachAbort.abort();}});
+async function syncForAnalysis(origin){
+  if(coachAbort){$('analysis-sync-status').textContent='请先等待或取消当前 AI 分析。';return;}
+  if(!bank?.questions?.length){const message='请先连接题库。';$('analysis-sync-status').textContent=message;if(origin==='coach')$('coach-preview-status').textContent=message;return;}
+  if(analysisSyncing)return;analysisSyncing=true;$('analysis-sync').disabled=true;setCoachBusy(Boolean(coachAbort));
+  try{await client.sync();refreshDashboard();const message=preview?'本机预览记录已更新，不会同步到其他设备。':'已同步最新记录，分析已更新。';$('analysis-sync-status').textContent=message;if(origin==='coach')$('coach-preview-status').textContent=coachPromptDirty?'记录已更新；材料有手动编辑，如需使用最新记录请重新生成。':message;}
+  catch(e){$('analysis-sync-status').textContent=`同步未完成，仍显示本机记录：${e.message}`;if(origin==='coach')$('coach-preview-status').textContent='同步未完成，当前材料仍基于本机记录。';}
+  finally{analysisSyncing=false;$('analysis-sync').disabled=false;setCoachBusy(Boolean(coachAbort));}
+}
+$('analysis-sync').addEventListener('click',()=>syncForAnalysis('analysis'));$('coach-sync').addEventListener('click',()=>syncForAnalysis('coach'));
 $('coach-generate').addEventListener('click',generateCoachPrompt);
 $('coach-prompt').addEventListener('input',()=>{coachPromptDirty=true;updateCoachResult();});
 $('coach-include-questions').addEventListener('change',()=>{if(coachPromptDirty){coachPromptStale=true;$('coach-run').disabled=true;$('coach-copy').disabled=true;$('coach-download').disabled=true;updateCoachResult();$('coach-preview-status').textContent='选项已更改。为避免发送与选择不符的内容，请点击“重新生成材料”（会替换手动编辑的文字）。';}else generateCoachPrompt();});
 $('coach-copy').addEventListener('click',copyCoachPrompt);
-$('coach-download').addEventListener('click',()=>{try{if(coachAbort||coachPromptStale)throw new Error('请先完成当前分析并更新预览');if(!bank?.questions?.length)throw new Error('请先连接题库');const data=buildLearningInsights(bank.questions,store.getEvents()),payload=buildCoachData(data,{includeQuestionDetails:$('coach-include-questions').checked,questions:bank.questions});const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`物理复习统计-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('coach-preview-status').textContent='已准备统计文件；该文件不包含你手动编辑的材料。';}catch(e){showError('coach-preview-status',e);}});
+$('coach-download').addEventListener('click',()=>{try{if(coachAbort||analysisSyncing||coachPromptStale)throw new Error('请先完成当前操作并更新预览');if(!bank?.questions?.length)throw new Error('请先连接题库');const data=buildLearningInsights(bank.questions,store.getEvents()),payload=buildCoachData(data,{includeQuestionDetails:$('coach-include-questions').checked,questions:bank.questions});const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`物理复习统计-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('coach-preview-status').textContent='已准备统计文件；该文件不包含你手动编辑的材料。';}catch(e){showError('coach-preview-status',e);}});
 $('coach-run').addEventListener('click',runCoach);$('coach-cancel').addEventListener('click',()=>coachAbort?.abort());
 $('settings-open').addEventListener('click',()=>{configInputs();screen('settings');});$('settings-close').addEventListener('click',()=>screen('setup'));
 $('connect').addEventListener('click',async()=>{const match=$('repo').value.trim().match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/),token=$('token').value.trim();if(!match||!token){$('connection-status').textContent='请填写用户名/仓库名和访问令牌。';return;}try{store.setConfig({owner:match[1],repo:match[2],token});$('connection-status').textContent='正在连接并读取题库…';bank=await client.loadQuestions();if(!Array.isArray(bank.questions))throw new Error('题库格式不正确');await client.sync();$('setup-status').textContent=`已载入 ${bank.questions.length} 题。`;screen('setup');}catch(e){showError('connection-status',e);}});
