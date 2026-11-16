@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob:; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>大学物理 · 复习</title><link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+<header><div class="wrap mast"><div><span class="eyebrow">PHYSICS REVIEW</span><h1>大学物理复习</h1><p>每天几题，把思路慢慢记住。</p></div><button id="settings-open" class="quiet" type="button">连接与设置</button></div></header>
+<main class="wrap">
+  <p id="sync-status" class="sync-status" role="status" aria-live="polite"></p>
+  <section id="setup" class="card"><h2>开始一组复习</h2><p class="muted">先回忆，再查看答案。不熟悉的题可以多练几次。</p>
+    <div class="fields"><label>科目<select id="subject"><option value="all">全部科目</option><option>电学</option><option>磁学</option><option>光学</option><option>相对论</option></select></label><label>题型<select id="type"><option value="all">选择和填空</option><option value="choice">选择题</option><option value="fill">填空题</option></select></label><label>题数<input id="count" type="number" min="1" max="310" value="10"></label><label>抽题方式<select id="mode"><option value="weak">优先复习不熟悉的题</option><option value="random">完全随机</option><option value="difficult">重点复习的题</option><option value="recent">最近复习的题</option></select></label></div>
+    <button id="start" type="button">开始复习</button><p id="setup-status" role="status" class="muted"></p>
+  </section>
+  <section id="practice" class="card" hidden><div class="topline"><span id="progress"></span><button class="quiet" id="end" type="button">结束本组</button></div><h2 id="question-title"></h2><p id="question-warning" class="notice"></p><div id="question-images" class="images"></div><button id="original-question" class="quiet" type="button" hidden>查看原题所在页</button><div id="choices" class="choices"></div><p id="choice-note" class="muted"></p><button id="reveal" type="button">查看答案与思路</button>
+    <div id="answer" hidden><h3>答案与提示</h3><p id="answer-text"></p><div id="answer-images" class="images"></div><button id="original-answer" class="quiet" type="button" hidden>查看原答案页（含其他题答案）</button><p id="answer-note" class="notice"></p><p id="study-hint"></p><p>这道题掌握得怎么样？</p><div class="ratings"><button type="button" data-rating="remembered">记住了</button><button type="button" data-rating="fuzzy">有点模糊</button><button type="button" data-rating="forgot">不会</button></div></div>
+  </section>
+  <section id="finished" class="card" hidden><h2>这一组完成了</h2><p id="finished-text"></p><button id="again" type="button">再练一组</button></section>
+  <section id="settings" class="card" hidden><div class="topline"><h2>连接与设置</h2><button id="settings-close" class="quiet" type="button">关闭</button></div><p class="muted">题库和记录保存在你的 GitHub 私有仓库中。访问令牌只保存在本机浏览器，具有此专用仓库的读写权限。</p><label>仓库（用户名/仓库名）<input id="repo" autocomplete="off" placeholder="例如 username/physics-private"></label><label>访问令牌<input id="token" type="password" autocomplete="off" placeholder="在此设备输入你的令牌"></label><div class="actions"><button id="connect" type="button">保存并连接</button><button id="sync" class="quiet" type="button">立即同步</button><button id="clear" class="danger" type="button">清除本机数据</button></div><p id="connection-status" role="status" class="muted"></p><p class="muted">请使用专用仓库的细粒度令牌。清除本机数据前请先确认记录已同步；此操作不会撤销 GitHub 上的令牌。</p></section>
+</main><footer class="wrap">原题与答案来自你的题库；存疑内容请对照原文。</footer><script type="module" src="src/app.mjs"></script>
+</body></html>
