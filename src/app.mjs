@@ -13,7 +13,7 @@ const store = createStorage(preview ? sessionStorage : localStorage);
 let bank=null, set=[], index=0, selection='', selectionAtReveal='', typedAtReveal='', usedHint=false;
 let urls=[], generation=0, syncTimer=null, questionStarted=0, sessionId='', sessionRatings=[], noteDirty=false;
 let coachPromptDirty=false, coachPromptStale=false, coachAbort=null, coachLastSentPrompt=null, analysisSyncing=false, coachRefreshPending=false;
-const label={remembered:'记住了',known:'记住了',fuzzy:'模糊',forgot:'不会'};
+const label={remembered:'记住了',known:'记住了',fuzzy:'模糊',forgot:'不会',method:'想得起思路',viewed:'看过留印象'};
 const client = preview ? {
   async loadQuestions(){const r=await fetch('./data/questions.json');if(!r.ok)throw new Error('无法读取本地题库');const q=await r.json();store.setQuestions(q);return q;},
   async loadImage(path){const r=await fetch('./'+path);if(!r.ok)throw new Error('无法读取本地图片');return r.blob();},
@@ -31,53 +31,54 @@ function configInputs(){const c=store.getConfig();$('repo').value=c.owner&&c.rep
 function scheduleSync(){clearTimeout(syncTimer);syncTimer=setTimeout(()=>client.sync().catch(()=>{}),1500);}
 function recommendationRandom(){const d=new Date();let state=(d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate())>>>0;return ()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296;};}
 function current(){return set[index];}
+function selectedType(){return document.querySelector('input[name=quick-type]:checked')?.value||'all';}
 function formatDate(value){const t=Date.parse(value);return Number.isFinite(t)?new Date(t).toLocaleDateString('zh-CN',{month:'numeric',day:'numeric'}):'待定';}
-function latestFor(id){return pickLatestEvents(store.getEvents()).get(id);}
+function latestFor(id){return pickLatestEvents(store.getEvents().filter(e=>e.kind!=='exposure')).get(id);}
 function lastNote(id){return store.getEvents().filter(e=>e.questionId===id && Object.hasOwn(e,'note') && Number.isFinite(Date.parse(e.at))).sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)||String(b.id).localeCompare(String(a.id)))[0]?.note||'';}
 function el(tag,text,cls){const node=document.createElement(tag);if(text!=null)node.textContent=text;if(cls)node.className=cls;return node;}
 function refreshDashboard(){
   const data=bank?.questions;
   if(!Array.isArray(data)||!data.length){$('recommended-start').disabled=true;$('recommendations').replaceChildren();return;}
   try{
-    const events=store.getEvents(), info=analyze(data,events), latest=pickLatestEvents(events), studied=info.totalQuestions-info.mastery.unreviewed;
+    const events=store.getEvents(),type=selectedType(),scoped=type==='all'?data:data.filter(q=>q.type===type),info=analyze(scoped,events),latest=pickLatestEvents(events.filter(e=>e.kind!=='exposure')),exposed=new Set(events.filter(e=>e.kind==='exposure').map(e=>e.questionId)),studied=info.totalQuestions-info.mastery.unreviewed-info.mastery.viewedOnly;
     $('stat-due').textContent=String(info.dueCount);$('stat-weak').textContent=String(info.mastery.fuzzy+info.mastery.forgot);
     $('stat-covered').textContent=`${studied}/${info.totalQuestions}`;$('stat-today').textContent=String(info.activity.at(-1)?.count||0);
     $('overview-date').textContent=new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric'});
-    const unscheduled=info.recommendations.filter(r=>r.rating!=='unreviewed'&&!Number.isFinite(Date.parse(latest.get(r.questionId)?.due))).length;
-    $('recommend-intro').textContent=info.dueCount?`有 ${info.dueCount} 道题到了复习时间，先从这些题开始。`:unscheduled?`有 ${unscheduled} 道旧记录没有复习时间，可以先回顾。`:info.mastery.unreviewed?`目前没有到期的题，可以先认识 ${info.mastery.unreviewed} 道未学题中的几道。`:'目前没有到期的题，可以随机看看或提前复习薄弱题。';
+    const unscheduled=info.recommendations.filter(r=>!['unreviewed','viewedOnly'].includes(r.rating)&&!Number.isFinite(Date.parse(latest.get(r.questionId)?.due))).length;
+    $('recommend-intro').textContent=info.dueCount?`有 ${info.dueCount} 道题到了复习时间，先从这些题开始。`:unscheduled?`有 ${unscheduled} 道旧记录没有复习时间，可以先回顾。`:info.mastery.viewedOnly?`有 ${info.mastery.viewedOnly} 道题看过但还没自测，方便时可以先回忆思路。`:info.mastery.unreviewed?`目前没有到期的题，可以先认识 ${info.mastery.unreviewed} 道未学题中的几道。`:'目前没有到期的题，可以随机看看或提前复习薄弱题。';
     const byId=new Map(data.map(q=>[q.id,q])), reasons=new Map(info.recommendations.map(r=>[r.questionId,r]));
-    const suggestions=chooseQuestions(data,events,{count:3,mode:'weak'},recommendationRandom());
+    const suggestions=chooseQuestions(data,events,{count:3,mode:'weak',type},recommendationRandom());
     const list=$('recommendations');list.replaceChildren();
     for(const q of suggestions){const detail=reasons.get(q.id),previous=latest.get(q.id);let why;
       if(detail?.reasons.includes('到期'))why=`已到复习时间${previous?.rating?` · 上次${label[previous.rating]||'已练习'}`:''}`;
-      else if(!previous)why='还没有练过';else if(!Number.isFinite(Date.parse(previous.due)))why=`旧记录待回顾 · 上次${label[previous.rating]||'已练习'}`;else why=`提前看看 · 上次${label[previous.rating]||'已练习'}`;
+      else if(!previous)why=exposed.has(q.id)?'看过，待自测':'还没有练过';else if(!Number.isFinite(Date.parse(previous.due)))why=`旧记录待回顾 · 上次${label[previous.rating]||'已练习'}`;else why=`提前看看 · 上次${label[previous.rating]||'已练习'}`;
       const button=el('button',null,'recommendation');button.type='button';button.append(el('span',`${q.subject} · 第 ${q.number} 题`,'rec-title'),el('span',why,'rec-reason'),el('span','练这题 →','rec-action'));button.addEventListener('click',()=>startSession({questionId:q.id}));list.append(button);
     }
-    $('recommended-start').disabled=false;
-    $('mastery-summary').textContent=`记住了 ${info.mastery.known} · 模糊 ${info.mastery.fuzzy} · 不会 ${info.mastery.forgot} · 未练 ${info.mastery.unreviewed}`;
+    $('recommended-start').disabled=!suggestions.length;
+    $('mastery-summary').textContent=`记住了 ${info.mastery.known} · 记得思路 ${info.mastery.method} · 模糊 ${info.mastery.fuzzy} · 不会 ${info.mastery.forgot} · 只看过 ${info.mastery.viewedOnly} · 未练 ${info.mastery.unreviewed}`;
     const compared=info.sourceComparison.match+info.sourceComparison.different;
     $('source-summary').textContent=compared?`新记录中有 ${info.sourceComparison.match} 次与原答案相同、${info.sourceComparison.different} 次不同。原答案尚未逐题核验，该对照不代表得分。`:'作答对照从新版开始记录；旧记录保留，但无法判断是否在看答案前作答。';
-    renderLearningInsights(data,events);
+    renderLearningInsights(scoped,events);
     if($('coach-panel').open&&!coachAbort){if(!coachPromptDirty)generateCoachPrompt();else $('coach-preview-status').textContent=coachPromptStale?'选项已更改，请先点击“重新生成材料”。':'这是你编辑过的材料；需要最新记录时请点“重新生成材料”。';}
     const subjectBox=$('subject-stats');subjectBox.replaceChildren();
-    for(const [subject,g] of Object.entries(info.subjects)){const item=el('div',null,'subject-row');const covered=g.total-g.unreviewed;item.append(el('strong',subject),el('span',`已练 ${covered}/${g.total} · 待复习 ${g.due} · 不熟悉 ${g.fuzzy+g.forgot}`));subjectBox.append(item);}
+    for(const [subject,g] of Object.entries(info.subjects)){const item=el('div',null,'subject-row');const covered=g.total-g.unreviewed-g.viewedOnly;item.append(el('strong',subject),el('span',`已练 ${covered}/${g.total} · 待复习 ${g.due} · 不熟悉 ${g.fuzzy+g.forgot}`));subjectBox.append(item);}
     const activity=$('activity');activity.replaceChildren();const max=Math.max(1,...info.activity.map(x=>x.count));
     for(const day of info.activity){const item=el('div',null,'activity-day'),bar=el('span',null,'activity-bar');bar.style.height=`${Math.max(4,Math.round(38*day.count/max))}px`;item.append(el('span',String(day.count),'activity-value'),bar,el('span',day.date.slice(5).replace('-','/'),'activity-label'));activity.append(item);}
     const recent=$('recent-activity');recent.replaceChildren();
     if(!info.recent.length)recent.append(el('p','完成几道题后，这里会显示你的记录。','muted'));
-    for(const event of info.recent.slice(0,5)){const q=byId.get(event.questionId);if(!q)continue;const item=el('button',null,'recent-row');item.type='button';item.append(el('span',`${q.subject} · 第 ${q.number} 题`),el('span',`${formatDate(event.at)} · ${label[event.rating]||'已练习'}`,'subtle'));item.addEventListener('click',()=>startSession({questionId:q.id}));recent.append(item);}
+    for(const event of info.recent.slice(0,5)){const q=byId.get(event.questionId);if(!q)continue;const item=el('button',null,'recent-row');item.type='button';item.append(el('span',`${q.subject} · 第 ${q.number} 题`),el('span',`${formatDate(event.at)} · ${event.kind==='exposure'?'看过留印象':label[event.rating]||'已练习'}`,'subtle'));item.addEventListener('click',()=>startSession({questionId:q.id}));recent.append(item);}
   }catch(e){showError('setup-status',e);}
 }
 function renderLearningInsights(questions,events){
   const data=buildLearningInsights(questions,events),metrics=$('analysis-metrics');metrics.replaceChildren();
   const independent=data.independentRecall.eligible?`${data.independentRecall.success}/${data.independentRecall.eligible} 次`:'暂无数据';
-  for(const [value,title] of [[`${data.activeDays7}/7 天`,'近 7 天有练习'],[String(data.overdueDayPlus),'昨天及以前到期'],[independent,'无提示先作答后自评记住']]){
+  for(const [value,title] of [[`${data.activeDays7}/7 天`,'近 7 天有学习'],[String(data.overdueDayPlus),'昨天及以前到期'],[independent,'无提示先作答后自评记住'],[`${data.totalExposures} 次`,'只看过，留印象']]){
     const card=el('div',null,'analysis-metric');card.append(el('strong',value),el('span',title));metrics.append(card);
   }
   const daily=$('analysis-daily');daily.replaceChildren();const max=Math.max(1,...data.daily14.map(x=>x.count));
   for(const day of data.daily14){const item=el('div',null,'analysis-day'),bar=el('span',null,'analysis-bar');bar.style.height=`${Math.max(4,Math.round(42*day.count/max))}px`;item.setAttribute('aria-label',`${day.date}：${day.count} 次，${day.unique} 道题`);item.append(el('span',String(day.count)),bar,el('span',day.date.slice(5).replace('-','/')));daily.append(item);}
   const subjects=$('analysis-subjects');subjects.replaceChildren();
-  for(const row of data.subjects){const item=el('div',null,'subject-row');item.append(el('strong',row.subject),el('span',`已练 ${row.covered}/${row.total} · 自评不熟 ${row.weak} · 待复习 ${row.due}`));subjects.append(item);}
+  for(const row of data.subjects){const item=el('div',null,'subject-row');item.append(el('strong',row.subject),el('span',`已练 ${row.covered}/${row.total} · 只看过 ${row.viewedOnly} · 自评不熟 ${row.weak} · 待复习 ${row.due}`));subjects.append(item);}
   const upcoming=$('analysis-upcoming');upcoming.replaceChildren();for(const day of data.upcoming7){const item=el('span',`${day.date.slice(5).replace('-','/')}  ${day.count} 题`,'upcoming-day');upcoming.append(item);}
   const advice=$('analysis-advice');advice.replaceChildren();for(const line of buildLocalAdvice(data))advice.append(el('li',line));
 }
@@ -132,14 +133,14 @@ async function images(target,paths,version,{pages=[],isQuestion=false}={}){
 function renderQuestion(){
   generation++;releaseImages();selection='';selectionAtReveal='';typedAtReveal='';usedHint=false;questionStarted=performance.now();
   $('answer').hidden=true;$('reveal').hidden=false;$('pre-hint').hidden=true;$('pre-hint').textContent='';$('choices').replaceChildren();$('answer-images').replaceChildren();$('original-answer').hidden=true;
-  $('typed-answer').value='';$('typed-answer').disabled=false;const q=current(),previous=latestFor(q.id),note=lastNote(q.id);
+  $('typed-answer').value='';$('typed-answer').disabled=false;$('typed-wrap').open=false;const q=current(),previous=latestFor(q.id),activity=pickLatestEvents(store.getEvents()).get(q.id),note=lastNote(q.id);
   $('progress').textContent=`第 ${index+1} / ${set.length} 题 · ${q.subject} · ${q.type==='choice'?'选择题':'填空题'}`;$('progress-bar').style.width=`${100*(index+1)/set.length}%`;
   $('question-title').textContent=`${q.subject} · 第 ${q.number} 题`;
-  $('question-history').textContent=previous?`上次自评：${label[previous.rating]||'已练习'}${previous.due?` · 复习时间 ${formatDate(previous.due)}`:''}`:'第一次练习这道题';
+  $('question-history').textContent=previous?`上次自评：${label[previous.rating]||'已练习'}${previous.due?` · 复习时间 ${formatDate(previous.due)}`:''}`:activity?.kind==='exposure'?'看过，尚未自测':'第一次练习这道题';
   $('question-warning').textContent=q.cropStatus==='page_fallback'?'暂用原页显示；题目页优先，其他页可能包含相关图。可用 + 放大并左右滑动。':'题面由原文裁切，尚待逐题核验；图片可放大并左右滑动。';
   $('original-question').hidden=!q.originalImages?.length||q.cropStatus==='page_fallback';
   images($('question-images'),q.images,generation,{pages:q.source?.pages||[],isQuestion:true});
-  $('typed-wrap').hidden=q.type!=='fill';$('choice-note').textContent=q.type==='choice'?'对照题图选择；不确定也可以直接看答案。':'可以先写关键词、在纸上作答，或只在心里回忆。';
+  $('typed-wrap').hidden=q.type!=='fill';for(const value of ['viewed','method'])document.querySelector(`[data-rating="${value}"]`).hidden=q.type!=='fill';document.querySelector('[data-rating="remembered"]').textContent=q.type==='fill'?'能独立做':'记住了';$('rating-prompt').textContent=q.type==='fill'?'看完这道题，选择最符合你的情况':'这道题掌握得怎么样？';$('choice-note').textContent=q.type==='choice'?'对照题图选择；不确定也可以直接看答案。':'可以先看题和思路，暂时不用计算；想填写时再展开输入。';
   $('show-hint').hidden=!(note||q.hint);$('show-hint').disabled=false;$('question-note').value=note;noteDirty=false;
   if(q.type==='choice')for(const letter of ['A','B','C','D','E']){const b=el('button',letter);b.type='button';b.setAttribute('aria-pressed','false');b.addEventListener('click',()=>{selection=letter;for(const item of $('choices').children){const selected=item===b;item.classList.toggle('selected',selected);item.setAttribute('aria-pressed',String(selected));}});$('choices').append(b);}
 }
@@ -155,15 +156,18 @@ async function showAnswer(){
   if(q.answerImages?.length)await images($('answer-images'),q.answerImages,generation);else{$('answer-note').textContent+=' 该题需要打开原答案页，页面会含其他题的答案。';$('original-answer').hidden=!(q.originalAnswerImages?.length);}
 }
 function record(rating){
-  const q=current(),at=new Date().toISOString(),previous=latestFor(q.id);
-  const compared=q.type==='choice'&&selectionAtReveal&&q.answer&&q.answerStatus==='source_matched_not_visually_verified'?(selectionAtReveal===q.answer?'match':'different'):null;
-  const next=nextDue(at,rating,previous?.interval||0,usedHint,previous?.due||null);
-  const event={id:crypto.randomUUID(),schemaVersion:2,sessionId,questionId:q.id,at,rating,selected:selectionAtReveal,typedAnswer:typedAtReveal,elapsedMs:Math.max(0,Math.round(performance.now()-questionStarted)),usedHint,answeredBeforeReveal:q.type==='choice'?Boolean(selectionAtReveal):typedAtReveal?true:null,comparedToSource:compared,sourceAnswer:compared?q.answer:null,sourceAnswerStatus:compared?q.answerStatus:null,interval:next.interval,due:next.due};
+  if($('practice').hidden||$('answer').hidden)return;
+  const q=current(),at=new Date().toISOString(),previous=latestFor(q.id),viewed=rating==='viewed';
+  if((viewed||rating==='method')&&q.type!=='fill')return;
+  const compared=!viewed&&q.type==='choice'&&selectionAtReveal&&q.answer&&q.answerStatus==='source_matched_not_visually_verified'?(selectionAtReveal===q.answer?'match':'different'):null;
+  const elapsedMs=Math.max(0,Math.round(performance.now()-questionStarted));let next=null,event;
+  if(viewed){event={id:crypto.randomUUID(),schemaVersion:3,sessionId,questionId:q.id,at,kind:'exposure',studyMode:'browse',elapsedMs,usedHint};if(typedAtReveal)event.typedAnswer=typedAtReveal;}
+  else{next=nextDue(at,rating,previous?.interval||0,usedHint,previous?.due||null);event={id:crypto.randomUUID(),schemaVersion:3,sessionId,questionId:q.id,at,kind:'review',studyMode:rating==='method'?'method':'recall',rating,selected:selectionAtReveal,typedAnswer:typedAtReveal,elapsedMs,usedHint,answeredBeforeReveal:q.type==='choice'?Boolean(selectionAtReveal):typedAtReveal?true:null,comparedToSource:compared,sourceAnswer:compared?q.answer:null,sourceAnswerStatus:compared?q.answerStatus:null,interval:next.interval,due:next.due};}
   if(noteDirty)event.note=$('question-note').value.trim();
   try{store.addEvent(event);}catch(e){$('answer-note').textContent=`记录未保存：${e.message}。请检查本机存储空间后重试。`;return;}
   sessionRatings.push(rating);scheduleSync();index++;
-  const saved=`已保存 · 下次复习 ${formatDate(next.due)}${compared==='different'?' · 与原答案不同，建议核对':usedHint?' · 看过提示，安排较早回忆':''}`;
-  if(index>=set.length){releaseImages();generation++;$('finished-text').textContent=preview?`本组共复习 ${set.length} 题。预览记录只保存在当前标签页。`:`本组共复习 ${set.length} 题。记录先保存在本机，联网后同步。`;const summary=$('session-summary');summary.replaceChildren();for(const [name,n] of [['记住了',sessionRatings.filter(r=>r==='remembered').length],['模糊',sessionRatings.filter(r=>r==='fuzzy').length],['不会',sessionRatings.filter(r=>r==='forgot').length]])summary.append(el('span',`${name} ${n}`));summary.append(el('span',saved));screen('finished');}
+  const saved=viewed?`已记录看过 · 不计为已掌握${previous?.due?' · 原复习时间不变':''}`:`已保存 · 下次复习 ${formatDate(next.due)}${compared==='different'?' · 与原答案不同，建议核对':usedHint?' · 看过提示，安排较早回忆':''}`;
+  if(index>=set.length){releaseImages();generation++;$('finished-text').textContent=preview?`本组共学习 ${set.length} 题。预览记录只保存在当前标签页。`:`本组共学习 ${set.length} 题。记录先保存在本机，联网后同步。`;const summary=$('session-summary');summary.replaceChildren();for(const [key,name] of [['viewed','看过'],['method','记得思路'],['remembered','记住了'],['fuzzy','模糊'],['forgot','不会']]){const n=sessionRatings.filter(r=>r===key).length;if(n)summary.append(el('span',`${name} ${n}`));}summary.append(el('span',saved));screen('finished');}
   else{$('last-saved').textContent=saved;renderQuestion();}
 }
 async function startSession(options={}){
@@ -171,7 +175,7 @@ async function startSession(options={}){
   try{bank=store.getQuestions()||bank;if(!bank?.questions?.length){$('setup-status').textContent='请先在设置中连接私有题库。';return;}
     if(navigator.onLine){$('setup-status').textContent='正在同步最新进度…';try{await client.sync();$('setup-status').textContent='';}catch(e){$('setup-status').textContent=`同步未完成，先使用本机记录：${e.message}`;}}
     const data=bank.questions,events=store.getEvents();
-    set=options.questionId?data.filter(q=>q.id===options.questionId):chooseQuestions(data,events,options.custom?{subject:$('subject').value,type:$('type').value,count:$('count').value,mode:$('mode').value}:{count:10,mode:'weak'},options.custom?Math.random:recommendationRandom());
+    set=options.questionId?data.filter(q=>q.id===options.questionId):chooseQuestions(data,events,options.custom?{subject:$('subject').value,type:$('type').value,count:$('count').value,mode:$('mode').value}:{count:10,mode:'weak',type:selectedType()},options.custom?Math.random:recommendationRandom());
     if(!set.length){$('setup-status').textContent=options.custom&&$('mode').value==='due'?'当前没有已到期的题，可以先练新题或提前复习。':'没有符合条件的题，请调整筛选。';return;}
     index=0;sessionId=crypto.randomUUID();sessionRatings=[];$('last-saved').textContent='';screen('practice');renderQuestion();
   }catch(e){showError('setup-status',e);}finally{$('start').disabled=false;$('recommended-start').disabled=false;}
@@ -199,6 +203,8 @@ $('backup-export').addEventListener('click',()=>{try{const records=store.getEven
 $('backup-import').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file)return;try{if(file.size>10*1024*1024)throw new Error('备份文件超过 10 MB');const incoming=readBackup(await file.text()),before=store.getEvents().length;store.setEvents(incoming);const added=store.getEvents().length-before;$('backup-status').textContent=`已合并 ${added} 条新记录；已有记录未覆盖。`;scheduleSync();}catch(e){$('backup-status').textContent=`导入未完成（部分记录可能已保存）：${e.message}`;}finally{event.target.value='';}});
 $('sync').addEventListener('click',()=>client.sync().catch(()=>{}));
 $('clear').addEventListener('click',()=>{if(!confirm('确定清除本机的令牌、题库缓存和所有本机记录吗？尚未同步的记录会丢失。'))return;try{store.clear();bank=null;releaseImages();$('token').value='';$('repo').value='';$('connection-status').textContent='已清除本机数据。';$('setup-status').textContent='请先连接私有题库。';}catch(e){showError('connection-status',e);}});
+for(const radio of document.querySelectorAll('input[name=quick-type]'))radio.addEventListener('change',()=>{if(radio.checked){$('type').value=radio.value;refreshDashboard();}});
+$('type').addEventListener('change',()=>{const radio=document.querySelector(`input[name=quick-type][value="${$('type').value}"]`);if(radio)radio.checked=true;refreshDashboard();});
 $('start').addEventListener('click',()=>startSession({custom:true}));$('recommended-start').addEventListener('click',()=>startSession());
 $('reveal').addEventListener('click',showAnswer);
 $('question-note').addEventListener('input',()=>{noteDirty=true;});

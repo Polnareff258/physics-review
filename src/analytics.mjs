@@ -8,14 +8,16 @@ export function analyze(questions = [], events = [], now = Date.now()) {
   for (const e of Array.isArray(events) ? events : []) if (e?.id != null && e.id !== '' && qs.has(e.questionId) && !unique.has(e.id)) unique.set(e.id, e);
   const time = value => { if (value == null || value === '') return NaN; const t = typeof value === 'number' ? value : Date.parse(value); return Number.isFinite(t) ? t : NaN; };
   const records = [...unique.values()];
-  const latest = pickLatestEvents(records);
-  const mastery = {known:0, fuzzy:0, forgot:0, unreviewed:0};
+  const reviews = records.filter(e => e.kind !== 'exposure');
+  const exposed = new Set(records.filter(e => e.kind === 'exposure').map(e => e.questionId));
+  const latest = pickLatestEvents(reviews);
+  const mastery = {known:0, fuzzy:0, forgot:0, method:0, viewedOnly:0, unreviewed:0};
   const subjects = Object.create(null), recommendations = [];
   let dueCount = 0;
   for (const q of qs.values()) {
-    const e = latest.get(q.id), rating = e?.rating === 'remembered' ? 'known' : ['known','fuzzy','forgot'].includes(e?.rating) ? e.rating : 'unreviewed';
+    const e = latest.get(q.id), rating = e?.rating === 'remembered' ? 'known' : ['known','fuzzy','forgot','method'].includes(e?.rating) ? e.rating : !e && exposed.has(q.id) ? 'viewedOnly' : 'unreviewed';
     const subject = String(q.subject || '未分类');
-    const group = subjects[subject] ||= {total:0, known:0, fuzzy:0, forgot:0, unreviewed:0, due:0, recommendations:[]};
+    const group = subjects[subject] ||= {total:0, known:0, fuzzy:0, forgot:0, method:0, viewedOnly:0, unreviewed:0, due:0, recommendations:[]};
     group.total++; group[rating]++; mastery[rating]++;
     const due = time(e?.due), isDue = Number.isFinite(due) && due <= clock;
     if (isDue) { dueCount++; group.due++; }
@@ -23,14 +25,16 @@ export function analyze(questions = [], events = [], now = Date.now()) {
     if (isDue) reasons.push('到期');
     if (rating === 'forgot') reasons.push('不会');
     if (rating === 'fuzzy') reasons.push('模糊');
+    if (rating === 'method') reasons.push('记得思路');
+    if (rating === 'viewedOnly') reasons.push('看过，待自测');
     if (rating === 'unreviewed') reasons.push('未学习');
     if (reasons.length) recommendations.push({questionId:q.id, subject, reasons, due:isDue ? e.due : null, rating});
   }
-  const rank = {forgot:0, fuzzy:1, known:2, unreviewed:3};
+  const rank = {forgot:0, fuzzy:1, method:2, known:3, viewedOnly:4, unreviewed:5};
   recommendations.sort ( (a,b) => Number(b.reasons.includes('到期'))-Number(a.reasons.includes('到期')) || rank[a.rating]-rank[b.rating] || String(a.questionId).localeCompare(String(b.questionId)) );
   for (const item of recommendations) subjects[item.subject].recommendations.push(item);
   const sourceComparison = {match:0,different:0};
-  for (const e of records) if (e.comparedToSource === 'match' || e.comparedToSource === 'different') sourceComparison[e.comparedToSource]++;
+  for (const e of reviews) if (e.comparedToSource === 'match' || e.comparedToSource === 'different') sourceComparison[e.comparedToSource]++;
   const activity = [];
   const today = new Date(clock);
   for (let offset=6; offset>=0; offset--) {
