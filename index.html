@@ -7,17 +7,37 @@
   <title>大学物理 · 复习</title><link rel="stylesheet" href="src/style.css">
 </head>
 <body>
-<header><div class="wrap mast"><div><span class="eyebrow">PHYSICS REVIEW</span><h1>大学物理复习</h1><p>每天几题，把思路慢慢记住。</p></div><button id="settings-open" class="quiet" type="button">连接与设置</button></div></header>
+<header><div class="wrap mast"><div><span class="eyebrow">PHYSICS REVIEW</span><h1>大学物理复习</h1><p>一点一点，记得更牢。</p></div><button id="settings-open" class="quiet" type="button">设置</button></div></header>
 <main class="wrap">
   <p id="sync-status" class="sync-status" role="status" aria-live="polite"></p>
-  <section id="setup" class="card"><h2>开始一组复习</h2><p class="muted">先回忆，再查看答案。不熟悉的题可以多练几次。</p>
-    <div class="fields"><label>科目<select id="subject"><option value="all">全部科目</option><option>电学</option><option>磁学</option><option>光学</option><option>相对论</option></select></label><label>题型<select id="type"><option value="all">选择和填空</option><option value="choice">选择题</option><option value="fill">填空题</option></select></label><label>题数<input id="count" type="number" min="1" max="310" value="10"></label><label>抽题方式<select id="mode"><option value="weak">优先复习不熟悉的题</option><option value="random">完全随机</option><option value="difficult">重点复习的题</option><option value="recent">最近复习的题</option></select></label></div>
-    <button id="start" type="button">开始复习</button><p id="setup-status" role="status" class="muted"></p>
+  <section id="setup" hidden>
+    <div class="card dashboard">
+      <div class="section-heading"><div><span class="eyebrow">YOUR NEXT STEP</span><h2>今天复习什么？</h2></div><span id="overview-date" class="subtle"></span></div>
+      <p id="recommend-intro" class="recommend-intro">连接题库后，就可以根据你的记录安排复习。</p>
+      <div class="stats-grid" aria-label="复习概况">
+        <div><strong id="stat-due">—</strong><span>现在待复习</span></div><div><strong id="stat-weak">—</strong><span>仍不熟悉</span></div><div><strong id="stat-covered">—</strong><span>已经练过</span></div><div><strong id="stat-today">—</strong><span>今天练习次数</span></div>
+      </div>
+      <button id="recommended-start" type="button">开始推荐复习</button><p class="muted compact">优先到期题，再看新题；可在下方自行筛选。</p>
+      <div id="recommendations" class="recommendations" aria-live="polite"></div>
+    </div>
+    <details class="card details-card" id="custom-options"><summary>自选科目、题型和题数</summary>
+      <div class="fields"><label>科目<select id="subject"><option value="all">全部科目</option><option>电学</option><option>磁学</option><option>光学</option><option>相对论</option></select></label><label>题型<select id="type"><option value="all">选择和填空</option><option value="choice">选择题</option><option value="fill">填空题</option></select></label><label>题数<input id="count" type="number" min="1" max="310" value="10"></label><label>抽题方式<select id="mode"><option value="weak">优先到期与新题</option><option value="due">只练已到期的题</option><option value="random">完全随机</option><option value="difficult">重点复习的题</option><option value="recent">最近复习的题</option></select></label></div>
+      <button id="start" type="button">按条件开始</button>
+    </details>
+    <details class="card details-card" id="insights"><summary>查看学习记录与分析</summary><p class="muted">以下按你每次的自评统计。原答案尚未全部核验，因此不显示客观正确率。</p>
+      <h3>最近一次自评</h3><p id="mastery-summary" class="mastery-summary"></p><p id="source-summary" class="muted"></p><h3>各科进度</h3><div id="subject-stats" class="subject-stats"></div><h3>最近 7 天</h3><div id="activity" class="activity" aria-label="最近七天练习次数"></div>
+      <h3>最近复习过</h3><div id="recent-activity" class="recent-activity"></div>
+    </details>
+    <p id="setup-status" role="status" class="muted"></p>
   </section>
-  <section id="practice" class="card" hidden><div class="topline"><span id="progress"></span><button class="quiet" id="end" type="button">结束本组</button></div><h2 id="question-title"></h2><p id="question-warning" class="notice"></p><div id="question-images" class="images"></div><button id="original-question" class="quiet" type="button" hidden>查看原题所在页</button><div id="choices" class="choices"></div><p id="choice-note" class="muted"></p><button id="reveal" type="button">查看答案与思路</button>
-    <div id="answer" hidden><h3>答案与提示</h3><p id="answer-text"></p><div id="answer-images" class="images"></div><button id="original-answer" class="quiet" type="button" hidden>查看原答案页（含其他题答案）</button><p id="answer-note" class="notice"></p><p id="study-hint"></p><p>这道题掌握得怎么样？</p><div class="ratings"><button type="button" data-rating="remembered">记住了</button><button type="button" data-rating="fuzzy">有点模糊</button><button type="button" data-rating="forgot">不会</button></div></div>
+  <section id="practice" class="card practice-card" hidden>
+    <div class="topline"><span id="progress"></span><button class="quiet" id="end" type="button">结束本组</button></div><div class="progress-track"><span id="progress-bar"></span></div>
+    <h2 id="question-title"></h2><p id="question-history" class="subtle compact"></p><p id="last-saved" role="status" class="saved-status"></p><p id="question-warning" class="notice"></p>
+    <div id="question-images" class="images"></div><button id="original-question" class="quiet compact-button" type="button" hidden>查看原题所在页</button>
+    <div id="choices" class="choices"></div><button id="show-hint" class="quiet compact-button" type="button" hidden>提示一下</button><p id="pre-hint" class="hint" hidden></p><label id="typed-wrap" hidden>先写下你的答案（可选）<textarea id="typed-answer" rows="2" maxlength="500" placeholder="写关键词、公式思路，或先在心里回忆"></textarea></label><p id="choice-note" class="muted"></p><button id="reveal" type="button">查看答案与思路</button>
+    <div id="answer" hidden><h3>答案与思路</h3><p id="answer-text"></p><p id="prior-answer" class="subtle"></p><div id="answer-images" class="images"></div><button id="original-answer" class="quiet compact-button" type="button" hidden>查看原答案页（含其他题答案）</button><p id="answer-note" class="notice"></p><p id="study-hint" class="hint"></p><label>我的记忆线索（可选）<textarea id="question-note" rows="2" maxlength="300" placeholder="写下能帮自己想起来的一句话"></textarea></label><p class="muted compact">编辑后随本次自评保存，下次遇到这道题会显示。</p><details id="note-history-wrap" hidden><summary>查看以前写过的线索</summary><div id="note-history"></div></details><p class="rating-prompt">这道题掌握得怎么样？</p><div class="ratings"><button type="button" data-rating="remembered">记住了</button><button type="button" data-rating="fuzzy">有点模糊</button><button type="button" data-rating="forgot">不会</button></div></div>
   </section>
-  <section id="finished" class="card" hidden><h2>这一组完成了</h2><p id="finished-text"></p><button id="again" type="button">再练一组</button></section>
-  <section id="settings" class="card" hidden><div class="topline"><h2>连接与设置</h2><button id="settings-close" class="quiet" type="button">关闭</button></div><p class="muted">题库和记录保存在你的 GitHub 私有仓库中。访问令牌只保存在本机浏览器，具有此专用仓库的读写权限。</p><label>仓库（用户名/仓库名）<input id="repo" autocomplete="off" placeholder="例如 username/physics-private"></label><label>访问令牌<input id="token" type="password" autocomplete="off" placeholder="在此设备输入你的令牌"></label><div class="actions"><button id="connect" type="button">保存并连接</button><button id="sync" class="quiet" type="button">立即同步</button><button id="clear" class="danger" type="button">清除本机数据</button></div><p id="connection-status" role="status" class="muted"></p><p class="muted">请使用专用仓库的细粒度令牌。清除本机数据前请先确认记录已同步；此操作不会撤销 GitHub 上的令牌。</p></section>
+  <section id="finished" class="card" hidden><span class="eyebrow">SESSION COMPLETE</span><h2>这一组完成了</h2><p id="finished-text"></p><div id="session-summary" class="session-summary"></div><button id="again" type="button">返回复习首页</button></section>
+  <section id="settings" class="card" hidden><div class="topline"><h2>连接与设置</h2><button id="settings-close" class="quiet" type="button">关闭</button></div><p class="muted">题库和记录保存在你的 GitHub 私有仓库中。访问令牌只保存在本机浏览器，具有此专用仓库的读写权限。</p><label>仓库（用户名/仓库名）<input id="repo" autocomplete="off" placeholder="例如 username/physics-private"></label><label>访问令牌<input id="token" type="password" autocomplete="off" placeholder="在此设备输入你的令牌"></label><div class="actions"><button id="connect" type="button">保存并连接</button><button id="sync" class="quiet" type="button">立即同步</button><button id="clear" class="danger" type="button">清除本机数据</button></div><p id="connection-status" role="status" class="muted"></p><h3>学习记录备份</h3><p class="muted">备份只包含学习记录，不包含访问令牌。更换仓库前建议先备份；导入时会合并已有记录。</p><div class="actions"><button id="backup-export" class="quiet" type="button">下载备份</button><label class="file-label">导入备份<input id="backup-import" type="file" accept="application/json,.json"></label></div><p id="backup-status" class="muted" role="status"></p><p class="muted">请使用专用仓库的细粒度令牌。清除本机数据前请先确认记录已同步；此操作不会撤销 GitHub 上的令牌。</p></section>
 </main><footer class="wrap">原题与答案来自你的题库；存疑内容请对照原文。</footer><script type="module" src="src/app.mjs"></script>
 </body></html>
